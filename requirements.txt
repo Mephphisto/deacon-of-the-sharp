@@ -1,0 +1,25 @@
+# Verified working together on Python 3.11.
+#
+# NOTE ON GPU SUPPORT: the stock PyPI torch wheel below already includes
+# sm_120, so RTX 50-series (Blackwell, e.g. 5070 Ti) works with a plain
+# `pip install -r requirements.txt`. No --extra-index-url is needed.
+# Verify with:  python -c "import torch; print(torch.cuda.get_arch_list())"
+
+torch==2.14.0
+
+numpy==2.4.6
+scipy==1.17.1
+scikit-image==0.26.0
+pooch==1.9.0          # required for skimage.data.cells3d / human_mitosis / kidney
+matplotlib==3.11.2
+tqdm==4.70.1
+
+# Notebook
+jupyter
+notebook
+
+# Dev tooling
+ruff==0.16.7
+pyright==1.1.414
+pytest==9.1.1
+pre-commit
