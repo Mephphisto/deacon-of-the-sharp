@@ -5,15 +5,42 @@ physics, conventions, libraries and starting hyperparameters for Phase 2 (Plan).
 
 ---
 
-## 0. Decisions needed at this gate
+## 0. Gate decisions — RESOLVED
 
-Three items need your call before planning. Everything else below is settled.
-
-| # | Decision | Recommendation |
+| # | Decision | Resolution |
 |---|---|---|
-| **D1** | **Real-data source.** The EPFL dataset has three problems (§6.2): it is blocked by this container's network egress, it is almost entirely **3D** (only the Siemens star is 2D), and parts of it are gated behind an email request. | Use **`skimage.data` bundled microscopy images** (CC-0, ship with the library, zero download) as the transfer test. Optionally add the EPFL Siemens star if you download it manually — it is pedagogically excellent. |
-| **D2** | **Train on beads only, or beads + extended structures?** A bead-only model may transfer poorly to real biology because the image statistics differ sharply (§6.1). | **Mix in synthetic extended structures** (filaments, blobs). Costs nothing — it is all synthetic — and materially improves the odds the transfer test succeeds. |
-| **D3** | **Geometric augmentation.** Flips and rotations are *not* label-preserving here: rotating the image rotates the PSF, which permutes and re-signs the Zernike coefficients (§8.3). | **No geometric augmentation.** Infinite fresh synthesis makes it unnecessary, and the failure mode is silent label corruption. |
+| **D1** | **Real-data source.** EPFL is egress-blocked here, almost entirely **3D** (only the Siemens star is 2D), and partly email-gated (§6.2). | **`skimage.data` bundled CC-0 microscopy.** EPFL Siemens star optional manual download. |
+| **D2** | **Training data mix**, and whether real data belongs in training at all. | **Two runs.** Runs 1–2 train fully synthetic (50 % beads / 50 % extended) and *measure* the sim-to-real gap on held-out real data. Run 3 adds 10 % real `cells3d()` slices and shows whether the gap closes. |
+| **D3** | **Geometric augmentation** — flips/rotations are not label-preserving (§8.3). | **None.** |
+
+### Train/test split (fixed by D2)
+
+Keeping these disjoint is what makes the transfer test mean anything:
+
+| Split | Source |
+|---|---|
+| Train — synthetic | Bead fields + extended structures, generated fresh on GPU |
+| Train — real (**Run 3 only**) | `skimage.data.cells3d()` — 60 z × 2 channels = **120 distinct 256² slices** |
+| **Held out** | `skimage.data.human_mitosis()` (512²), `skimage.data.kidney()` (16 z × 3 ch = 48 slices, 512²) |
+
+The three runs:
+
+| Run | Input variant | Data | Measures |
+|---|---|---|---|
+| 1 | image-only | 100 % synthetic | Baseline + sim-to-real gap |
+| 2 | image + spectrum | 100 % synthetic | Whether the Fourier channel helps |
+| 3 | *winner of 1 vs 2* | + 10 % real `cells3d()` | Whether real data closes the gap |
+
+Run 3 differs from its own baseline **only** in the data mix, so the comparison
+isolates one variable.
+
+### Caveat to state in the notebook
+
+Real microscopy images are **already blurred by the microscope that acquired
+them**. Using them as "sharp" sources means the synthetic PSF is an *additional*
+blur on top of an unknown existing one. This is standard practice in the
+literature and fine for a PoC, but a physicist will notice immediately — so say
+it rather than let it be caught.
 
 ---
 
@@ -302,12 +329,12 @@ maybe 15 min. Comfortably inside the 4 h budget with room for the sweep in §4.1
 Beads are pedagogically ideal — a point source *is* the PSF, so the aberration is
 directly visible to the eye.
 
-**But see D2.** A bead-only model sees image statistics utterly unlike real
-biology (sparse impulses vs. dense extended texture) and may transfer badly. The
-literature reflects this concern — recent work explicitly addresses Zernike
-prediction from "PSFs **and extended images**". Recommended mitigation: mix in
-synthetic **extended structures** (random filaments, blobs, discs) at ~50 %.
-It is free — all synthetic — and substantially de-risks the transfer test.
+**Resolved per D2.** A bead-only model sees image statistics utterly unlike real
+biology (sparse impulses vs. dense extended texture) and would likely transfer
+badly. The literature reflects this concern — recent work explicitly addresses
+Zernike prediction from "PSFs **and extended images**". Training is therefore
+**50 % beads / 50 % synthetic extended structures** (random filaments, blobs,
+discs). It is free — all synthetic — and substantially de-risks the transfer test.
 
 **Noise model** (applied after convolution, randomized per sample):
 
@@ -446,13 +473,16 @@ generator, which is already handled by sampling coefficients freshly.)
 
 ---
 
-## 10. Changes this implies for `AGENDA.md`
+## 10. Changes applied to `AGENDA.md`
 
-If D1–D3 are accepted:
+D1–D3 accepted; `AGENDA.md` updated accordingly:
 
-- **Real data** row: EPFL → `skimage.data` bundled images, EPFL Siemens star optional
-- **Training data** row: beads → beads + synthetic extended structures
-- **New locked row**: Zernike convention = Noll, `Z4 ≥ 0` sign restriction
-- **New locked row**: no geometric augmentation
-- **Open risks**: drop the two EPFL rows, add "defocus sign weakly identifiable
-  from a single in-focus image — mitigated by the `Z4 ≥ 0` restriction"
+- **Real data** row → `skimage.data` bundled images, held-out set named, EPFL Siemens star optional
+- **Training data** row → 50 % beads / 50 % synthetic extended structures
+- **New locked row** → Zernike convention = Noll `j = 4…11`, `Z4 ≥ 0`
+- **New locked row** → no geometric augmentation
+- **New locked row** → optics pinned (NA 1.4, 520 nm, 65 nm px, 256² pupil, R = 45 px)
+- **Phase 1** → all items checked, gate marked passed
+- **Phase 4** → Run 3 added; transfer test retargeted to the held-out `skimage` images
+- **Open risks** → EPFL rows dropped; added Zernike-convention corruption, defocus-sign
+  degeneracy, and the already-blurred-real-images caveat

@@ -62,8 +62,11 @@ moments of the notebook rather than incidental details.
 | Image noise | Poisson shot + Gaussian read noise, **randomized** across samples |
 | Wavefront noise | None — adds unidentifiable degrees of freedom, no pedagogical gain |
 | PSF assumption | Spatially invariant |
-| Training data | Synthetic bead fields, generated **on GPU** inside the training loop (`torch.fft`) |
-| Real data | EPFL Biomedical Imaging Group — used as **transfer test**, not training corpus |
+| Training data | **50 % synthetic bead fields + 50 % synthetic extended structures** (filaments, blobs), generated **on GPU** inside the training loop (`torch.fft`) |
+| Real data | **`skimage.data`** bundled CC-0 microscopy. **Held out** for the transfer test: `human_mitosis()`, `kidney()`. Used in training only in Run 3: `cells3d()` slices. EPFL Siemens star is an optional manual download (see `RESEARCH.md` §6.2) |
+| Zernike convention | **Noll** indexing, `j = 4…11`, with `Z4 ≥ 0` to remove the defocus-sign degeneracy |
+| Augmentation | **None** — flips and rotations are not label-preserving here (rotation mixes the coefficient pairs while leaving the label untouched) |
+| Optics | NA 1.4, λ 520 nm, 65 nm pixels, 256² pupil grid, pupil radius 45 px — Nyquist verified at 2.91 px across FWHM |
 | Working resolution | 128² for training runs; single 256² run for final figures |
 | Framework | PyTorch |
 | Classical baselines | `scikit-image` — Wiener, `unsupervised_wiener`, Richardson–Lucy |
@@ -90,19 +93,19 @@ dataloader stalls — and is only a few lines, since the forward model is just F
 
 ## Phase 1 — Research
 
-- [ ] Set up skills for the next phase (`show-me`, `ponytail`)
-- [ ] Topic research: Fourier optics, PSF/OTF relationship, Zernike basis,
+- [x] Set up skills for the next phase (`show-me`, `ponytail`)
+- [x] Topic research: Fourier optics, PSF/OTF relationship, Zernike basis,
       Wiener vs. Richardson–Lucy, deep-learning wavefront sensing / adaptive optics
-- [ ] Library research: PyTorch, `scikit-image`, Zernike basis generation,
+- [x] Library research: PyTorch, `scikit-image`, Zernike basis generation,
       Gibson–Lanni PSF references
-- [ ] **Verify the EPFL dataset**: availability, current host, format, size, licence
-      (redistributable or download-script-only?)
-- [ ] Fix the regularized-inverse convention: Wiener vs. Tikhonov, and how λ is chosen
-- [ ] Confirm PSF sampling meets Nyquist (≥ 2–3 px across the Airy FWHM)
-- [ ] Hyperparameter starting points (optimizer, LR schedule, batch size, augmentation)
-- [ ] Write `RESEARCH.md`
+- [x] **Verify the EPFL dataset** — egress-blocked here, almost entirely 3D, partly
+      email-gated. Replaced by bundled `skimage.data` images
+- [x] Fix the regularized-inverse convention — Wiener, with `λ_reg ≈ 1/SNR`
+- [x] Confirm PSF sampling meets Nyquist — 2.91 px across FWHM, 1.43× oversampled
+- [x] Hyperparameter starting points (optimizer, LR schedule, batch size, augmentation)
+- [x] Write `RESEARCH.md`
 
-**GATE: manual verification of `RESEARCH.md`**
+**GATE: PASSED** — D1/D2/D3 resolved, see `RESEARCH.md` §0
 
 ---
 
@@ -139,9 +142,13 @@ dataloader stalls — and is only a few lines, since the forward model is just F
 
 - [ ] **Overfit-one-batch smoke test** — gate: near-zero loss on ~8 samples,
       otherwise there is a bug
-- [ ] Full training runs, both input variants. Stopping / hyperparameter-tuning
-      criterion: the supervised coefficient loss (sufficient for a PoC)
+- [ ] **Run 1 & 2** — both input variants, fully synthetic training data.
+      Stopping / hyperparameter-tuning criterion: the supervised coefficient loss
+      (sufficient for a PoC)
 - [ ] Compare image-only vs. image + spectrum result quality
+- [ ] **Run 3** — the winning input variant, retrained with 10 % real `cells3d()`
+      slices mixed in. Differs from its baseline *only* in the data mix, so the
+      comparison isolates the effect of real data.
 - [ ] **Real-world verification section** — evaluate the actual image improvement,
       not just regression quality:
   - deconvolution using the **predicted** PSF
@@ -149,8 +156,9 @@ dataloader stalls — and is only a few lines, since the forward model is just F
   - vs. a **default/wrong** PSF (naive baseline)
   - metrics: PSNR, SSIM, optionally Fourier Ring Correlation for a resolution
     figure in nm
-- [ ] **Transfer test** on EPFL real confocal data — trained on beads, does it
-      work on real biology? Report the sim-to-real gap honestly.
+- [ ] **Transfer test** on held-out real data (`human_mitosis()`, `kidney()`) —
+      trained on synthetic, does it work on real biology? Report the sim-to-real
+      gap honestly for Run 1/2, then show whether Run 3 closes it.
 
 **GATE: manual verification of results**
 
@@ -160,8 +168,9 @@ dataloader stalls — and is only a few lines, since the forward model is just F
 
 | Risk | Contingency |
 |---|---|
-| EPFL dataset too small to train on | Already the plan — beads-primary, EPFL as transfer test only |
-| EPFL licence prohibits redistribution | Download script + local cache; commit few or no images |
-| Bead-trained model doesn't transfer to real biology | This is a **finding to report**, not a failure. The sim-to-real gap is part of the demo's honesty. |
-| 4 h budget overrun | 128² working resolution keeps both runs at ~15–20 min each; 256² reserved for final figures only |
+| Synthetic-trained model doesn't transfer to real biology | This is a **finding to report**, not a failure — it is exactly what Run 1/2 vs. Run 3 measures. Mitigated in advance by training on extended structures, not beads alone. |
+| Zernike convention mismatch corrupts every label | Highest-value bug in the project — silent, and training still looks healthy. Mitigated by the orthonormality unit test in `RESEARCH.md` §2.2. |
+| Defocus sign weakly identifiable from one in-focus image | `\|FFT(P)\|²` has a parity degeneracy. Mitigated by restricting `Z4 ≥ 0`; otherwise it puts an irreducible floor on the loss that looks like a training bug. |
+| 4 h budget overrun | 128² working resolution keeps each run at ~10–15 min; three runs ≈ 45 min; 256² reserved for final figures only |
 | Model collapses to a degenerate PSF | Mitigated by construction: bounded 8-dim parametrization with no shift/scale ambiguity |
+| Real images used as "sharp" sources are already blurred | Acknowledged openly in the notebook — the synthetic PSF is an *additional* blur on top of the acquiring microscope's. Standard practice, but stated rather than hidden. |
