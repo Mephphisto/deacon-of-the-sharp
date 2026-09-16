@@ -7,8 +7,12 @@ evaluating a machine-learning model for the deconvolution of 2D microscopy image
 
 A CNN observes a blurred image and predicts the **parameters of the point-spread
 function (PSF)** that produced the blur. From those parameters a **regularized
-(Wiener) inverse filter** is constructed analytically and applied, sharpening the
-image.
+(Wiener) inverse filter** is constructed in closed form and applied to the blurred
+image, sharpening it.
+
+The pipeline therefore has two stages, and only the first is learned:
+
+> blurred image → `[CNN]` → PSF parameters → `[closed-form Wiener inverse]` → sharpened image
 
 The notebook is **didactic, written for a physicist rather than a programmer**, and
 follows the physics narrative:
@@ -18,15 +22,25 @@ follows the physics narrative:
 
 Scope: **proof of concept / demo**, not product development.
 
-### Two corrections to the original framing
+### Why the model predicts the forward PSF, and why its inverse must be regularized
 
-1. The model predicts the **forward PSF**, not the inverse kernel. The inverse is
-   then *derived* in closed form. An exact inverse kernel does not exist — the OTF
-   has a hard cutoff at `2·NA/λ` plus interior zeros, and near-zero values amplify
-   noise as `N/K`. Only *regularized* inverses (Wiener, Tikhonov) are well defined.
-2. The kernel is not "applied to sharpen" — its **regularized inverse** is applied.
-   Applying the kernel itself would blur further. This distinction is a core
-   teaching point of the notebook.
+An exact inverse kernel does not exist — for physical rather than numerical reasons:
+
+- The OTF has a **hard cutoff** at `2·NA/λ`, above which it is exactly zero. Those
+  spatial frequencies were destroyed by the microscope; no inverse recovers them.
+- Aberrated and defocused OTFs have additional **interior zeros** inside the passband.
+- Where the OTF is small but nonzero, `Y = K·X + N` inverts to `Y/K = X + N/K`, so
+  **noise is amplified without bound**.
+
+Only regularized inverses (Wiener, Tikhonov) are well defined, which is why the
+learned quantity is the **forward** PSF: it is bounded, low-dimensional and
+physically meaningful, and the regularized inverse is then derived from it with λ
+chosen at inference. It also feeds Richardson–Lucy directly, which needs only the
+forward PSF.
+
+Note that sharpening applies the **regularized inverse**, not the kernel itself —
+applying the kernel would blur the image further. Both points are core teaching
+moments of the notebook rather than incidental details.
 
 ---
 
