@@ -9,10 +9,36 @@ layout and execution budget.
 
 | # | Decision | Rationale |
 |---|---|---|
-| **P1** | **Single self-contained notebook, no `src/` module** | The audience reads physics, not software. Equations should be visible where they are used, not one import away. `ponytail` agrees: a module for ~20 short functions used by one consumer is premature structure. |
-| **P2** | **Do not commit model checkpoints** | The committed executed outputs carry the story. Three checkpoints would add ~35 MB of binary to git for no reader benefit. |
+| **P1** | **Thin notebook + `deconv/` module** | The notebook carries the narrative, the parameters and the figures; the module carries the machinery. This is also what makes P5–P7 possible at all — notebook cells cannot be linted, type-checked or unit-tested. |
+| **P2** | **Commit text and code only.** Weights, caches and datasets go in `.gitignore` | No binary artifacts in git. See the note below on notebook outputs. |
 | **P3** | **`pooch` is a pinned dependency; images come from skimage's own cache** | Verified: `human_mitosis`/`cells3d`/`kidney` are *not* bundled and fetch from gitlab.com on first call. No download script and no committed images needed — skimage already solves this. One-time network requirement, documented in the notebook. |
 | **P4** | **Device-agnostic with a CPU warning** | Target is the 5070 Ti, but the notebook should not crash for a reader on CPU — it should say the runs will be slow and offer a reduced step count. |
+| **P5** | **Ruff** — lint clean at every step | |
+| **P6** | **Pyright** in `standard` mode — type-checks clean at every step | `strict` fights numpy/torch stubs constantly and would cost more than it catches on a PoC. `standard` catches the real errors. |
+| **P7** | **pytest** — every module function tested, run on every commit | The point is that a physicist reading the notebook never has to debug the machinery. |
+
+### Note on notebook outputs (flagging a possible conflict)
+
+"Commit text and code only" could be read as stripping notebook outputs too. I am
+**keeping the executed outputs**, because an earlier locked requirement says the
+demo must be showable *without* a 4 h live re-run — which is only possible if the
+outputs are committed. The cost is that `deconvolution_demo.ipynb` carries
+embedded figure PNGs and will be a few MB.
+
+If you would rather strip outputs and accept that the notebook must be re-run to
+be seen, say so and I will add `nbstripout` instead. **Weights, caches and
+datasets are excluded either way.**
+
+### Keeping the notebook didactic despite the module
+
+Moving code into `deconv/` risks a notebook that reads as
+`deconv.psf_from_pupil(...)` with the physics invisible. The rule to hold:
+
+- **Every key equation appears in the notebook as LaTeX markdown**, next to the
+  call that evaluates it. The module is the executable mirror of the formula, not
+  a replacement for showing it.
+- Plotting boilerplate goes in `deconv/viz.py` and is *not* shown — matplotlib
+  setup is not physics and only distracts.
 
 ---
 
@@ -147,37 +173,88 @@ problem; CARE-style direct restoration as the alternative approach not taken.
 
 ## 5. Code architecture
 
-All inline (P1). Roughly 20 short functions, grouped by the part that introduces
-them.
+### Repository layout
 
 ```
-Part 1  zernike_noll(j, rho, theta)      the 8 closed-form polynomials
-        zernike_basis(n, radius)          -> (8, N, N), precomputed once
-        pupil_from_coeffs(c, basis)       -> complex pupil
-        psf_from_pupil(P)                 -> normalised intensity PSF
-        otf_from_psf(h)
-        convolve_fft(obj, psf)
-        add_noise(img, photons, read_sigma)
+deconv/
+  __init__.py
+  optics.py      Zernike basis, pupil, PSF, OTF, Wiener, naive inverse
+  data.py        object generators, noise, real-image loading
+  model.py       PSFNet, train loop
+  metrics.py     PSNR, SSIM, FRC
+  viz.py         plotting helpers (not shown in the notebook)
+tests/
+  test_optics.py
+  test_data.py
+  test_model.py
+  test_metrics.py
+deconvolution_demo.ipynb
+pyproject.toml            ruff + pyright + pytest config
+.pre-commit-config.yaml
+requirements.txt
+.gitignore
+```
 
-Part 2  wiener_filter(otf, lam)
-        apply_wiener(y, otf, lam)
-        naive_inverse(y, otf)             deliberately unregularised
+Five modules, grouped by concept rather than by notebook part — `optics.py` is
+the one a physicist would actually want to read.
 
-Part 3  sample_coeffs(batch)              uniform, with c4 >= 0
-        make_beads(batch, size)
-        make_extended(batch, size)        filaments, blobs, discs
-        synth_batch(batch, real_frac)     the whole GPU pipeline
-        load_real_slices(which)           cells3d / mitosis / kidney
-        class PSFNet(nn.Module)
-        train(model, steps, ...)          one function, reused for all 3 runs
+### `deconv/optics.py`
 
-Part 4  psnr(a, b) / ssim(a, b)           skimage
-        frc(img_a, img_b)                 two independent noise draws
-        three_way_compare(...)            the money plot
+```
+zernike_noll(j, rho, theta)       the 8 closed-form polynomials, Noll indexed
+zernike_basis(n_grid, radius)     -> (8, N, N), precomputed once
+pupil_from_coeffs(c, basis)       -> complex pupil
+psf_from_pupil(P)                 -> normalised intensity PSF
+otf_from_psf(h)
+wiener_filter(otf, lam)
+apply_wiener(y, otf, lam)
+naive_inverse(y, otf)             deliberately unregularised
+```
+
+### `deconv/data.py`
+
+```
+sample_coeffs(batch)              uniform, with c4 >= 0
+make_beads(batch, size)
+make_extended(batch, size)        filaments, blobs, discs
+convolve_fft(obj, psf)
+add_noise(img, photons, read_sigma)
+synth_batch(batch, real_frac)     the whole GPU pipeline
+load_real_slices(which)           cells3d / mitosis / kidney
+```
+
+### `deconv/model.py`
+
+```
+class PSFNet(nn.Module)
+train(model, steps, ...)          one function, reused for all 3 runs
 ```
 
 `train()` being a single reused function is what keeps three runs from becoming
-three copies of a training loop.
+three copies of a training loop — and makes the Run 3 comparison genuinely
+controlled.
+
+### `deconv/metrics.py`
+
+```
+psnr(a, b) / ssim(a, b)           thin wrappers over skimage
+frc(img_a, img_b)                 two independent noise draws
+```
+
+### `deconv/viz.py`
+
+```
+plot_zernike_gallery(...)
+plot_psf_and_profile(...)
+plot_otf(...)
+plot_lambda_sweep(...)
+plot_loss_curves(...)
+plot_three_way(...)               the money plot
+plot_frc(...)
+```
+
+Notebook cells call these as one-liners so the narrative is not buried in
+matplotlib.
 
 ### Object generators
 
@@ -250,22 +327,103 @@ a hyperparameter sweep if the first results disappoint.
 
 ---
 
+## 8b. Tooling and quality gates (P5–P7)
+
+### Configuration
+
+All three tools configured in a single `pyproject.toml`.
+
+| Tool | Mode | Scope |
+|---|---|---|
+| **Ruff** | lint + format, default rules plus `I` (import sort) | `deconv/`, `tests/` |
+| **Pyright** | `standard` | `deconv/`, `tests/` |
+| **pytest** | — | `tests/` |
+
+Pyright runs in `standard` rather than `strict` deliberately: `strict` spends most
+of its time fighting incomplete numpy and torch stubs, which costs more than it
+catches on a project this size. Every function still carries full annotations.
+
+### Running on every commit
+
+A `.pre-commit-config.yaml` runs all three as a git hook. The `pre-commit`
+framework is used rather than a raw `.git/hooks/pre-commit` because hooks in
+`.git/` are not committed and would not survive a clone.
+
+```
+ruff check    < 1 s
+ruff format   < 1 s
+pyright       ~ 5–10 s
+pytest        ~ 10–20 s
+```
+
+Roughly 30 s per commit, which is inside the range where people do not start
+reaching for `--no-verify`. If it creeps past that, pyright and pytest move to a
+pre-push hook and ruff stays on commit.
+
+### Unit tests are CPU-only and fast
+
+**Tests never train a model and never touch a GPU.** Convergence is verified by
+the overfit-one-batch gate in the notebook, not by the test suite. Tests cover
+correctness of the machinery; the notebook covers whether the science works.
+
+### Test plan
+
+The physics tests are the valuable ones — this is where a silent error would
+otherwise propagate into a plausible-looking but wrong result.
+
+**`test_optics.py`**
+- Zernike basis is orthonormal: `⟨Zi,Zj⟩ = δij` over `ρ ≤ 1`
+- Each mode has its expected rotational symmetry (`Z4`, `Z11` invariant; `Z5/Z6` 2-fold; `Z9/Z10` 3-fold)
+- `c = 0` reproduces the Airy disc; first zero matches `0.61·λ/NA` within one pixel
+- PSF sums to 1 and its centre of mass is at the grid centre
+- `OTF(0) = 1`; OTF support vanishes beyond `2·NA/λ`
+- Wiener with `λ → 0` approaches the naive inverse
+- Wiener of a delta-function PSF is ~identity
+
+**`test_data.py`**
+- Bead count lands in the requested range; intensities positive; sub-pixel placement works
+- Extended structures are non-degenerate (not all-zero, not saturated)
+- `convolve_fft` of a delta PSF is the identity
+- Convolution preserves total intensity
+- Poisson noise preserves the mean, increases the variance
+- Real loaders return the documented shapes and normalise into `[0,1]`
+- **Held-out images never appear in the training pool** — asserted directly
+
+**`test_model.py`**
+- Forward pass returns `(batch, 8)` for both input variants
+- Parameter count is in the planned 2–4 M range
+- Fixed seed gives deterministic output
+- One optimizer step on a fixed tiny batch decreases the loss (CPU, seconds)
+
+**`test_metrics.py`**
+- PSNR of identical images is large; decreases monotonically with added noise
+- SSIM of identical images is 1
+- FRC of an image with itself is ~1 across frequencies; of uncorrelated noise, ~0
+
+---
+
 ## 9. Build order for Phase 3
 
-Strictly bottom-up, so each layer is verified before the next depends on it:
+Strictly bottom-up, so each layer is verified before the next depends on it.
+**Every step ends green on ruff + pyright + pytest before the next begins** —
+that is what "lints and type-checks at each step" means in practice.
 
-1. Zernike basis + **orthonormality test** ← if this is wrong, everything is wrong
-2. Pupil → PSF → OTF; verify the Airy disc against `0.61·λ/NA` analytically
-3. Forward model: convolve + noise
-4. Classical inverse: naive, Wiener, RL with a **known** PSF ← *sanity gate: if this doesn't visibly sharpen, stop*
-5. Object generators
-6. CNN + `train()`
-7. **Overfit-one-batch** ← *gate*
-8. The three runs
-9. Evaluation and figures
-10. Real-data transfer
+| # | Step | Tests written alongside |
+|---|---|---|
+| 0 | Scaffolding: `pyproject.toml`, ruff/pyright/pytest config, pre-commit hook, `.gitignore` | — |
+| 1 | Zernike basis ← *if this is wrong, everything is wrong* | orthonormality, symmetry |
+| 2 | Pupil → PSF → OTF | Airy first zero vs `0.61·λ/NA`, normalisation, OTF cutoff |
+| 3 | Forward model: convolve + noise | delta-PSF identity, intensity conservation, noise statistics |
+| 4 | Classical inverse: naive, Wiener, RL with a **known** PSF ← *sanity gate: if this doesn't visibly sharpen, stop* | Wiener→naive limit, delta-PSF identity |
+| 5 | Object generators | count ranges, non-degeneracy |
+| 6 | Real-image loading | shapes, normalisation, **held-out disjointness** |
+| 7 | CNN + `train()` | shapes, determinism, one-step loss decrease |
+| 8 | Metrics | identity and noise-monotonicity properties |
+| 9 | **Overfit-one-batch** in the notebook ← *gate* | — |
+| 10 | The three runs | — |
+| 11 | Evaluation, figures, real-data transfer | — |
 
-Steps 1, 4 and 7 are the three places where a silent bug would otherwise survive
+Steps 1, 4 and 9 are the three places where a silent bug would otherwise survive
 all the way to a confusing final result.
 
 ---

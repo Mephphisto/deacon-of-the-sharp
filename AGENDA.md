@@ -73,6 +73,11 @@ moments of the notebook rather than incidental details.
 | Hardware target | RTX 5070 Ti + i9-9900K + 32 GB |
 | Runtime target | Full notebook < 4 h end-to-end; demo may be shown from committed outputs without live re-run |
 | Reproducibility | Fixed seeds, pinned `requirements.txt`, notebooks committed **with executed outputs** |
+| Code layout | **Thin notebook + `deconv/` module** (5 files). Notebook carries narrative, parameters and figures; module carries machinery |
+| Linting | **Ruff** (lint + format) — clean at every build step |
+| Type checking | **Pyright**, `standard` mode — clean at every build step |
+| Testing | **pytest** — every module function covered, CPU-only and fast; run on every commit via `pre-commit` |
+| Committed to git | **Text and code only.** Weights, datasets and caches are `.gitignore`d |
 | Relevant skills | `show-me` (diagrams), `ponytail` (minimal didactic code) |
 
 ### Why noise randomization is free under Approach A
@@ -130,13 +135,21 @@ dataloader stalls — and is only a few lines, since the forward model is just F
 
 ## Phase 3 — Build
 
-- [ ] GPU-side PSF generator and forward model (Zernike → pupil → PSF → convolve → noise)
-- [ ] Classical baseline first: Richardson–Lucy / Wiener with a **known** PSF
+Built strictly bottom-up (`PLAN.md` §9). **Every step ends green on
+ruff + pyright + pytest before the next begins.**
+
+- [ ] Scaffolding: `pyproject.toml` (ruff + pyright + pytest), `.pre-commit-config.yaml`, `.gitignore`
+- [ ] `deconv/optics.py` — Zernike basis, pupil, PSF, OTF + tests
+      *(orthonormality test first — a convention error here corrupts everything downstream)*
+- [ ] `deconv/data.py` — forward model, object generators, real-image loading + tests
+- [ ] Classical baseline: Richardson–Lucy / Wiener with a **known** PSF
       *(cheap sanity gate — if this doesn't visibly sharpen, nothing downstream will)*
-- [ ] CNN model and training loop
-- [ ] Both input variants: image-only and image + log-power-spectrum
-- [ ] `deconvolution_demo.ipynb`
-- [ ] `requirements.txt` (pinned)
+- [ ] `deconv/model.py` — CNN and the single reused `train()` + tests
+- [ ] `deconv/metrics.py` — PSNR, SSIM, FRC + tests
+- [ ] `deconv/viz.py` — plotting helpers
+- [ ] `deconvolution_demo.ipynb` — narrative, with every key equation as LaTeX
+      beside the call that evaluates it
+- [ ] `requirements.txt` (pinned, includes `pooch`)
 
 **GATE: manual verification of `deconvolution_demo.ipynb`**
 
