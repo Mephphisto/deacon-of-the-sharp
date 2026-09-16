@@ -111,14 +111,18 @@ dataloader stalls — and is only a few lines, since the forward model is just F
 
 ## Phase 2 — Plan
 
-- [ ] Mermaid graph of the ML pipeline and the physics forward/inverse model
-- [ ] Software architecture and module layout
-- [ ] Didactic notebook layout following the physics narrative (not the usual
-      data → model → train → eval ordering)
-- [ ] Train/test discipline: **disjoint source images** between splits so the model
-      cannot memorize image content
-- [ ] Decide data handling: commit sample images vs. download script + cache
-- [ ] Write `PLAN.md`
+- [x] Mermaid graph of the ML pipeline and the physics forward/inverse model
+      — three graphs: forward model, inference pipeline, training loop
+- [x] Software architecture and module layout — single self-contained notebook,
+      no `src/` module (P1)
+- [x] Didactic notebook layout following the physics narrative (not the usual
+      data → model → train → eval ordering) — six parts, `PLAN.md` §4
+- [x] Train/test discipline: **disjoint source images** between splits so the model
+      cannot memorize image content — fixed in `RESEARCH.md` §0
+- [x] Decide data handling — `pooch` + skimage's own cache; nothing committed (P3).
+      Verified that `human_mitosis`/`cells3d`/`kidney` are *not* bundled and fetch
+      on first call
+- [x] Write `PLAN.md`
 
 **GATE: manual verification of `PLAN.md`**
 
