@@ -81,6 +81,26 @@ def test_frc_decreases_when_noise_is_added(image: torch.Tensor) -> None:
     assert noisy < clean
 
 
+def test_frc_tracks_noise_level_not_signal_content(image: torch.Tensor) -> None:
+    """FRC resolution is set by the noise budget.
+
+    Pins the property that makes FRC the wrong tool for comparing PSF estimates:
+    two reconstructions of the same scene at the same noise level decorrelate at
+    the same frequency regardless of what else differs between them, while
+    changing the noise level moves the resolution substantially.
+    """
+    torch.manual_seed(7)
+
+    def pair(sigma: float) -> torch.Tensor:
+        a = image + sigma * torch.randn_like(image)
+        b = image + sigma * torch.randn_like(image)
+        return frc(a, b)
+
+    quiet = frc_resolution_nm(pair(0.02), OPTICS)
+    loud = frc_resolution_nm(pair(0.5), OPTICS)
+    assert loud > quiet, "more noise must give a coarser (larger) resolution"
+
+
 def test_frc_rejects_mismatched_shapes(image: torch.Tensor) -> None:
     with pytest.raises(ValueError):
         frc(image, torch.rand(32, 32))

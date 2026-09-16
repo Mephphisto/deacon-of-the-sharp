@@ -60,6 +60,13 @@ def frc(image_a: torch.Tensor, image_b: torch.Tensor, n_bins: int | None = None)
     Important: the two inputs must be independent noise realisations of the same
     object. Correlating a reconstruction against its own ground truth is not an
     FRC and does not measure resolution.
+
+    Equally important, and easy to get wrong: FRC measures the **noise-limited**
+    resolution. Where two noise draws decorrelate is set by the photon budget,
+    not by how accurate the PSF used to reconstruct them was. Deconvolving with
+    the true PSF and with a deliberately wrong one yields the same FRC
+    resolution. To judge PSF accuracy, compare against ground truth with
+    :func:`psnr` or :func:`ssim` instead.
     """
     if image_a.shape != image_b.shape:
         raise ValueError("FRC requires two images of the same shape")

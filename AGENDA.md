@@ -138,18 +138,28 @@ dataloader stalls — and is only a few lines, since the forward model is just F
 Built strictly bottom-up (`PLAN.md` §9). **Every step ends green on
 ruff + pyright + pytest before the next begins.**
 
-- [ ] Scaffolding: `pyproject.toml` (ruff + pyright + pytest), `.pre-commit-config.yaml`, `.gitignore`
-- [ ] `deconv/optics.py` — Zernike basis, pupil, PSF, OTF + tests
+- [x] Scaffolding: `pyproject.toml` (ruff + pyright + pytest), `.pre-commit-config.yaml`, `.gitignore`
+- [x] `deconv/optics.py` — Zernike basis, pupil, PSF, OTF + tests
       *(orthonormality test first — a convention error here corrupts everything downstream)*
-- [ ] `deconv/data.py` — forward model, object generators, real-image loading + tests
-- [ ] Classical baseline: Richardson–Lucy / Wiener with a **known** PSF
-      *(cheap sanity gate — if this doesn't visibly sharpen, nothing downstream will)*
-- [ ] `deconv/model.py` — CNN and the single reused `train()` + tests
-- [ ] `deconv/metrics.py` — PSNR, SSIM, FRC + tests
-- [ ] `deconv/viz.py` — plotting helpers
-- [ ] `deconvolution_demo.ipynb` — narrative, with every key equation as LaTeX
+- [x] `deconv/data.py` — forward model, object generators, real-image loading + tests
+- [x] Classical baseline: Richardson–Lucy / Wiener with a **known** PSF —
+      **PASSED**: +5.02 dB at 2000 photons, naive inverse catastrophic at 6.15 dB.
+      Also found that below ~100 photons even a perfect PSF gains nothing
+- [x] `deconv/model.py` — CNN and the single reused `train()` + tests (2,377,960 params)
+- [x] `deconv/metrics.py` — PSNR, SSIM, FRC + tests
+- [x] `deconv/viz.py` — plotting helpers
+- [x] `deconvolution_demo.ipynb` — narrative, with every key equation as LaTeX
       beside the call that evaluates it
-- [ ] `requirements.txt` (pinned, includes `pooch`)
+- [x] `requirements.txt` (pinned, `pooch` included; plain PyPI `torch` since it
+      already ships `sm_120`)
+- [x] Overfit-one-batch gate — **PASSED** at 5.8e-11
+- [x] Executed end-to-end in `QUICK` mode on CPU to prove the pipeline runs
+
+**GATE: manual verification of `deconvolution_demo.ipynb`**
+
+> Committed outputs come from `QUICK = True` (a few hundred steps on CPU) and are
+> a pipeline smoke test, not science. Every results cell prints a banner saying
+> so. Set `QUICK = False` and run on the 5070 Ti for Phase 4.
 
 **GATE: manual verification of `deconvolution_demo.ipynb`**
 
@@ -178,6 +188,24 @@ ruff + pyright + pytest before the next begins.**
       gap honestly for Run 1/2, then show whether Run 3 closes it.
 
 **GATE: manual verification of results**
+
+### Open question carried into Phase 4
+
+At `QUICK` scale the model reaches only ~0.19 waves MAE against a chance level of
+0.25, and 5x more steps moved it only 0.197 → 0.189. It learns the rotationally
+symmetric modes best (`Z4` defocus, `Z11` spherical), which is physically
+sensible — those change the PSF's radial profile, while higher-azimuthal modes
+need orientation cues.
+
+The full run sees ~40x more samples at 4x the resolution, so it should do
+substantially better, **but this is not yet demonstrated**. If the full run also
+stalls near chance, the first things to try are a narrower photon range (see
+below), a higher learning rate, and a longer schedule.
+
+Also unresolved: FRC reported an identical 244.7 nm for predicted, oracle and
+wrong PSF at `QUICK` scale — plausibly because decorrelation is set by the noise
+floor rather than the PSF, but it needs rechecking at full scale before the
+figure is trusted.
 
 ---
 
