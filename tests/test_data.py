@@ -28,7 +28,15 @@ from deconv.data import (
     sample_coeffs,
     synth_batch,
 )
-from deconv.optics import N_COEFFS, Optics, zernike_basis
+from deconv.optics import (
+    N_COEFFS,
+    Optics,
+    center_crop,
+    convolve_fft,
+    otf_from_psf,
+    psf_from_coeffs,
+    zernike_basis,
+)
 
 OPTICS = Optics()
 SIZE = 64
@@ -251,19 +259,50 @@ def test_synth_batch_is_reproducible(
     assert torch.allclose(a_img, b_img)
 
 
-def test_blur_actually_degrades_the_image(
+def test_convolution_reduces_high_frequency_content(
     basis_and_mask: tuple[torch.Tensor, torch.Tensor],
 ) -> None:
-    """Sanity: the forward model must reduce high-frequency content."""
+    """Blurring must attenuate high frequencies - the defining act of the forward model.
+
+    Tested on the *noiseless* convolution. See the companion test below for why
+    the same claim is false once noise is added.
+    """
     basis, mask = basis_and_mask
     g = torch.Generator()
     g.manual_seed(3)
 
-    images, _, objects = synth_batch(8, SIZE, OPTICS, basis, mask, generator=g, bead_fraction=0.0)
+    coeffs = sample_coeffs(8, generator=g)
+    psf = center_crop(psf_from_coeffs(coeffs, basis, mask), SIZE)
+    objects = make_extended(8, SIZE, generator=g)
+    blurred = convolve_fft(objects, otf_from_psf(psf))
 
     sharp_hf = log_power_spectrum(normalise_image(objects))[:, :8, :8].mean()
-    blur_hf = log_power_spectrum(images)[:, :8, :8].mean()
+    blur_hf = log_power_spectrum(normalise_image(blurred))[:, :8, :8].mean()
     assert blur_hf < sharp_hf
+
+
+def test_noise_raises_the_high_frequency_floor(
+    basis_and_mask: tuple[torch.Tensor, torch.Tensor],
+) -> None:
+    """Shot noise is white, so it refills the band that blurring emptied.
+
+    This is physically correct and worth pinning: it means the OTF's signature in
+    the power spectrum sits on a noise floor, and the ``image+spectrum`` variant
+    has to read the mid-frequency rolloff rather than the cutoff itself.
+    """
+    basis, mask = basis_and_mask
+    g = torch.Generator()
+    g.manual_seed(4)
+
+    coeffs = sample_coeffs(8, generator=g)
+    psf = center_crop(psf_from_coeffs(coeffs, basis, mask), SIZE)
+    objects = make_extended(8, SIZE, generator=g)
+    blurred = convolve_fft(objects, otf_from_psf(psf))
+    noisy = add_noise(blurred, peak_photons=500.0, read_sigma=2.0, generator=g)
+
+    clean_hf = log_power_spectrum(normalise_image(blurred))[:, :8, :8].mean()
+    noisy_hf = log_power_spectrum(normalise_image(noisy))[:, :8, :8].mean()
+    assert noisy_hf > clean_hf
 
 
 # --------------------------------------------------------------------------

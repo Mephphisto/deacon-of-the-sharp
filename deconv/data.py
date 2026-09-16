@@ -103,42 +103,67 @@ def make_extended(
     size: int,
     generator: torch.Generator | None = None,
     device: torch.device | str | None = None,
+    max_blobs: int = 12,
+    max_filaments: int = 8,
+    filament_steps: int = 60,
 ) -> torch.Tensor:
     """Filaments, blobs and discs - crude mimics of cytoskeleton and nuclei.
 
     Beads alone are a poor proxy for biology: sparse impulses have completely
     different image statistics from dense extended texture, and a bead-only model
     transfers badly. These cost nothing to generate and close much of that gap.
+
+    Fully vectorised over the batch. A per-image Python implementation runs ~100x
+    slower and, on GPU, forces a host sync per scalar read, which would leave the
+    GPU idle and make data synthesis dominate the training budget.
     """
     images = torch.zeros(batch, size, size, device=device)
 
     coords = torch.arange(size, device=device, dtype=torch.float32)
     yy, xx = torch.meshgrid(coords, coords, indexing="ij")
 
-    for b in range(batch):
-        # blobs and discs
-        n_blobs = int(torch.randint(3, 12, (1,), generator=generator, device=device).item())
-        for _ in range(n_blobs):
-            cy = torch.rand(1, generator=generator, device=device).item() * size
-            cx = torch.rand(1, generator=generator, device=device).item() * size
-            radius = 2.0 + torch.rand(1, generator=generator, device=device).item() * 8.0
-            amp = 0.3 + torch.rand(1, generator=generator, device=device).item()
-            r2 = (yy - cy) ** 2 + (xx - cx) ** 2
-            images[b] += amp * torch.exp(-r2 / (2.0 * radius**2))
+    def rand(*shape: int) -> torch.Tensor:
+        return torch.rand(*shape, generator=generator, device=device)
 
-        # filaments as short random walks
-        n_fil = int(torch.randint(2, 8, (1,), generator=generator, device=device).item())
-        for _ in range(n_fil):
-            steps = int(torch.randint(20, 80, (1,), generator=generator, device=device).item())
-            y = torch.rand(1, generator=generator, device=device).item() * size
-            x = torch.rand(1, generator=generator, device=device).item() * size
-            angle = torch.rand(1, generator=generator, device=device).item() * 6.283
-            amp = 0.5 + torch.rand(1, generator=generator, device=device).item()
-            for _ in range(steps):
-                angle += (torch.rand(1, generator=generator, device=device).item() - 0.5) * 0.4
-                y = (y + np.sin(angle)) % size
-                x = (x + np.cos(angle)) % size
-                images[b, int(y), int(x)] += amp
+    # --- blobs: one vectorised pass per blob slot, batched over images ---
+    centres = rand(batch, max_blobs, 2) * size
+    radii = 2.0 + rand(batch, max_blobs) * 8.0
+    amps = 0.3 + rand(batch, max_blobs)
+
+    n_blobs = torch.randint(3, max_blobs + 1, (batch, 1), generator=generator, device=device)
+    amps = amps * (torch.arange(max_blobs, device=device)[None, :] < n_blobs)
+
+    for k in range(max_blobs):
+        cy = centres[:, k, 0].view(-1, 1, 1)
+        cx = centres[:, k, 1].view(-1, 1, 1)
+        radius = radii[:, k].view(-1, 1, 1)
+        amp = amps[:, k].view(-1, 1, 1)
+        r2 = (yy[None] - cy) ** 2 + (xx[None] - cx) ** 2
+        images += amp * torch.exp(-r2 / (2.0 * radius**2))
+
+    # --- filaments: random walks stepped in parallel across batch and filament ---
+    n_fil = torch.randint(2, max_filaments + 1, (batch, 1), generator=generator, device=device)
+    active = torch.arange(max_filaments, device=device)[None, :] < n_fil
+
+    y = rand(batch, max_filaments) * size
+    x = rand(batch, max_filaments) * size
+    angle = rand(batch, max_filaments) * (2.0 * np.pi)
+    amp = (0.5 + rand(batch, max_filaments)) * active
+
+    batch_index = (
+        torch.arange(batch, device=device).view(-1, 1).expand(batch, max_filaments).reshape(-1)
+    )
+    flat_amp = amp.reshape(-1)
+
+    for _ in range(filament_steps):
+        angle = angle + (rand(batch, max_filaments) - 0.5) * 0.4
+        y = (y + torch.sin(angle)) % size
+        x = (x + torch.cos(angle)) % size
+        images.index_put_(
+            (batch_index, y.long().reshape(-1), x.long().reshape(-1)),
+            flat_amp,
+            accumulate=True,
+        )
 
     return images
 
