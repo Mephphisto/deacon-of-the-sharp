@@ -199,8 +199,17 @@ need orientation cues.
 
 The full run sees ~40x more samples at 4x the resolution, so it should do
 substantially better, **but this is not yet demonstrated**. If the full run also
-stalls near chance, the first things to try are a narrower photon range (see
-below), a higher learning rate, and a longer schedule.
+stalls near chance, try these in order:
+
+1. **Narrow the photon range.** `NoiseConfig` currently starts at 50 photons, but
+   the Part 2.4 sweep shows deconvolution gains nothing below ~100 — so those
+   samples carry no learnable PSF signal and act as label noise. Raising
+   `min_photons` to ~200 is the most promising single change. *An experiment to
+   test this was attempted and timed out under CPU contention, so it remains
+   untested.*
+2. **Raise the learning rate.** 3e-4 may be conservative for a task this small.
+3. **Lengthen the schedule**, which is the least likely to help on its own — 5x
+   the steps bought only 0.197 → 0.189 at QUICK scale.
 
 Also unresolved: FRC reported an identical 244.7 nm for predicted, oracle and
 wrong PSF at `QUICK` scale — plausibly because decorrelation is set by the noise
