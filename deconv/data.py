@@ -160,7 +160,10 @@ def make_extended(
         y = (y + torch.sin(angle)) % size
         x = (x + torch.cos(angle)) % size
         images.index_put_(
-            (batch_index, y.long().reshape(-1), x.long().reshape(-1)),
+            # % size again in integer space: the float modulo above can return
+            # exactly `size` when (y + sin) lands just below zero, because
+            # size - eps is not representable in float32 and rounds up.
+            (batch_index, (y.long() % size).reshape(-1), (x.long() % size).reshape(-1)),
             flat_amp,
             accumulate=True,
         )
