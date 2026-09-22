@@ -41,3 +41,8 @@ env/
 Thumbs.db
 .idea/
 .vscode/
+
+# Notebook export artifacts (PLAN.md P2: commit text and code only)
+deconvolution_demo.html
+deconvolution_demo.pdf
+*.executed.ipynb
