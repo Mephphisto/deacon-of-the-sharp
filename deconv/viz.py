@@ -26,6 +26,17 @@ def _show(ax: Axes, image: torch.Tensor, title: str = "", cmap: str = _IMG_CMAP)
     ax.axis("off")
 
 
+def _strip(panels: list[tuple[torch.Tensor, str]], emphasise: int | None = None) -> Figure:
+    """One row of images with titles; ``emphasise`` bolds a single panel."""
+    fig, axes = plt.subplots(1, len(panels), figsize=(3.2 * len(panels), 3.6))
+    for ax, (image, title) in zip(axes, panels, strict=True):
+        _show(ax, image, title)
+    if emphasise is not None:
+        axes[emphasise].set_title(axes[emphasise].get_title(), fontsize=9, fontweight="bold")
+    fig.tight_layout()
+    return fig
+
+
 def plot_zernike_gallery(basis: torch.Tensor, mask: torch.Tensor) -> Figure:
     """The 8 Noll modes used as the label vector."""
     fig, axes = plt.subplots(2, 4, figsize=(12, 6))
@@ -187,19 +198,43 @@ def plot_three_way(
     The gap between `predicted` and `oracle` is what the model costs you; the gap
     between `predicted` and `naive` is what it buys you.
     """
-    panels = [
-        (blurred, f"blurred\n{scores['blurred']:.2f} dB"),
-        (naive_psf, f"wrong PSF\n{scores['naive']:.2f} dB"),
-        (predicted, f"PREDICTED PSF\n{scores['predicted']:.2f} dB"),
-        (oracle, f"true PSF (oracle)\n{scores['oracle']:.2f} dB"),
-        (truth, "ground truth"),
-    ]
-    fig, axes = plt.subplots(1, 5, figsize=(16, 3.6))
-    for ax, (image, title) in zip(axes, panels, strict=True):
-        _show(ax, image, title)
-    axes[2].set_title(axes[2].get_title(), fontsize=9, fontweight="bold")
-    fig.tight_layout()
-    return fig
+    return _strip(
+        [
+            (blurred, f"blurred\n{scores['blurred']:.2f} dB"),
+            (naive_psf, f"wrong PSF\n{scores['naive']:.2f} dB"),
+            (predicted, f"PREDICTED PSF\n{scores['predicted']:.2f} dB"),
+            (oracle, f"true PSF (oracle)\n{scores['oracle']:.2f} dB"),
+            (truth, "ground truth"),
+        ],
+        emphasise=2,
+    )
+
+
+def plot_real_data_comparison(
+    blurred: torch.Tensor,
+    synthetic_only: torch.Tensor,
+    with_real: torch.Tensor,
+    oracle: torch.Tensor,
+    truth: torch.Tensor,
+    scores: dict[str, float],
+) -> Figure:
+    """Does 10% real data in training show up in the reconstructed image?
+
+    The object, the PSF that blurred it, the noise draw and the Wiener step are
+    identical across every panel. Only the training mix behind the *predicted*
+    PSF differs between panels 2 and 3, so whatever separates them is
+    attributable to the data and to nothing else.
+    """
+    return _strip(
+        [
+            (blurred, f"blurred\n{scores['blurred']:.2f} dB"),
+            (synthetic_only, f"synthetic only\n{scores['synthetic only']:.2f} dB"),
+            (with_real, f"+10% REAL\n{scores['+10% real']:.2f} dB"),
+            (oracle, f"true PSF (oracle)\n{scores['oracle']:.2f} dB"),
+            (truth, "ground truth"),
+        ],
+        emphasise=2,
+    )
 
 
 def plot_frc(curves: dict[str, torch.Tensor], optics: Optics, threshold: float = 1 / 7) -> Figure:
